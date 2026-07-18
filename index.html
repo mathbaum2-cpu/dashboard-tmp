@@ -411,6 +411,32 @@
 
   .empty-state { font-size: 12px; color: var(--text-tertiary); font-style: italic; padding: 14px 0; text-align: center; }
 
+  .sleep-timeline {
+    display: flex;
+    height: 22px;
+    border-radius: 8px;
+    overflow: hidden;
+    margin: 4px 0 14px;
+    background: rgba(255,255,255,0.05);
+  }
+  .sleep-timeline:empty::after {
+    content: 'Keine Daten für letzte Nacht';
+    display: block;
+    width: 100%;
+    font-size: 11px;
+    color: var(--text-tertiary);
+    text-align: center;
+    line-height: 22px;
+    font-style: italic;
+  }
+  .sleep-timeline-seg { height: 100%; }
+  .sleep-timeline-range { display: flex; justify-content: space-between; font-size: 10.5px; color: var(--text-tertiary); font-variant-numeric: tabular-nums; margin-top: -8px; margin-bottom: 14px; }
+
+  .sleep-phase-legend { display: flex; flex-wrap: wrap; gap: 10px 16px; }
+  .sleep-phase-item { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--text-secondary); }
+  .sleep-phase-dot { width: 9px; height: 9px; border-radius: 50%; flex: 0 0 auto; }
+  .sleep-phase-mins { font-variant-numeric: tabular-nums; color: var(--text-primary); font-weight: 600; margin-left: 2px; }
+
   .goal-list { list-style: none; margin: 0; padding: 0; }
 
   .goal-row {
@@ -880,6 +906,31 @@
       <div class="page-inner">
 
         <h1 class="dash-title">Schlaf</h1>
+
+        <div class="section">
+          <div class="section-title">Letzte Nacht</div>
+          <div class="card">
+            <div class="gm-card-header">
+              <div class="gm-header-left">
+                <div class="gm-eyebrow">Schlafdauer</div>
+                <div class="gm-progress-row">
+                  <span class="gm-progress-num" id="sleepLiveDuration">—</span>
+                </div>
+              </div>
+              <div class="gm-header-left">
+                <div class="gm-eyebrow">Zeitraum</div>
+                <div class="gm-progress-row">
+                  <span class="gm-progress-num" id="sleepLiveRange" style="font-size:16px;">—</span>
+                </div>
+              </div>
+            </div>
+
+            <div id="sleepTimeline" class="sleep-timeline"></div>
+            <div id="sleepTimelineRange" class="sleep-timeline-range"></div>
+
+            <div id="sleepPhaseLegend" class="sleep-phase-legend"></div>
+          </div>
+        </div>
 
         <div class="section">
           <div class="section-title">Letzte 7 Nächte</div>
@@ -2048,6 +2099,110 @@
   });
 
   render();
+})();
+</script>
+
+<script>
+/* ---------- live sleep phases (from Health Connect sync) ---------- */
+(function () {
+  const PHASE_LABELS = {
+    light: 'Leichtschlaf',
+    deep: 'Tiefschlaf',
+    rem: 'REM',
+    awake: 'Wach',
+    awakeInBed: 'Wach (im Bett)',
+    outOfBed: 'Außerhalb Bett',
+    sleeping: 'Schlaf (unspezifisch)',
+    unknown: 'Unbekannt'
+  };
+  const PHASE_COLORS = {
+    light: '#3B82C4',
+    deep: '#2DD4BF',
+    rem: '#A78BFA',
+    awake: '#F2C063',
+    awakeInBed: '#E0A855',
+    outOfBed: '#E0A855',
+    sleeping: '#6B7280',
+    unknown: '#4B5563'
+  };
+
+  function pad(n) { return n < 10 ? '0' + n : '' + n; }
+  function formatClock(iso) {
+    const d = new Date(iso);
+    return pad(d.getHours()) + ':' + pad(d.getMinutes());
+  }
+  function formatDuration(minutes) {
+    const h = Math.floor(minutes / 60);
+    const m = Math.round(minutes % 60);
+    return h + 'h ' + m + 'm';
+  }
+
+  const durationEl = document.getElementById('sleepLiveDuration');
+  const rangeEl = document.getElementById('sleepLiveRange');
+  const timelineEl = document.getElementById('sleepTimeline');
+  const timelineRangeEl = document.getElementById('sleepTimelineRange');
+  const legendEl = document.getElementById('sleepPhaseLegend');
+  if (!durationEl || !timelineEl) return;
+
+  async function loadLiveSleep() {
+    let data;
+    try {
+      const res = await fetch('/api/health-data');
+      data = await res.json();
+    } catch (e) {
+      return;
+    }
+    const sleep = data && data.sleep && data.sleep.value;
+    if (!sleep || !sleep.segments || sleep.segments.length === 0) return;
+
+    durationEl.textContent = formatDuration(sleep.totalMinutes);
+    rangeEl.textContent = formatClock(sleep.startTime) + ' – ' + formatClock(sleep.endTime);
+
+    const totalMs = new Date(sleep.endTime) - new Date(sleep.startTime);
+    timelineEl.innerHTML = '';
+    sleep.segments.forEach(seg => {
+      const segMs = new Date(seg.end) - new Date(seg.start);
+      if (segMs <= 0 || totalMs <= 0) return;
+      const div = document.createElement('div');
+      div.className = 'sleep-timeline-seg';
+      div.style.width = (segMs / totalMs * 100) + '%';
+      div.style.background = PHASE_COLORS[seg.stage] || PHASE_COLORS.unknown;
+      div.title = (PHASE_LABELS[seg.stage] || seg.stage) + ' · ' + formatClock(seg.start) + '–' + formatClock(seg.end);
+      timelineEl.appendChild(div);
+    });
+
+    timelineRangeEl.innerHTML = '';
+    const startSpan = document.createElement('span');
+    startSpan.textContent = formatClock(sleep.startTime);
+    const endSpan = document.createElement('span');
+    endSpan.textContent = formatClock(sleep.endTime);
+    timelineRangeEl.appendChild(startSpan);
+    timelineRangeEl.appendChild(endSpan);
+
+    legendEl.innerHTML = '';
+    Object.keys(sleep.phaseMinutes || {})
+      .filter(stage => sleep.phaseMinutes[stage] > 0)
+      .sort((a, b) => sleep.phaseMinutes[b] - sleep.phaseMinutes[a])
+      .forEach(stage => {
+        const item = document.createElement('div');
+        item.className = 'sleep-phase-item';
+        const dot = document.createElement('span');
+        dot.className = 'sleep-phase-dot';
+        dot.style.background = PHASE_COLORS[stage] || PHASE_COLORS.unknown;
+        const label = document.createElement('span');
+        label.textContent = PHASE_LABELS[stage] || stage;
+        const mins = document.createElement('span');
+        mins.className = 'sleep-phase-mins';
+        mins.textContent = formatDuration(sleep.phaseMinutes[stage]);
+        item.appendChild(dot);
+        item.appendChild(label);
+        item.appendChild(mins);
+        legendEl.appendChild(item);
+      });
+  }
+
+  loadLiveSleep();
+  setInterval(loadLiveSleep, 30 * 1000);
 })();
 </script>
 
