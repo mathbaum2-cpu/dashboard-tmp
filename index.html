@@ -954,27 +954,6 @@
           </div>
         </div>
 
-        <div class="section">
-          <div class="section-title">Schlafprotokoll</div>
-          <div class="card">
-            <ul id="sleepList" class="habit-list"></ul>
-            <div id="sleepEmptyState" class="empty-state">Noch keine Nächte erfasst — füge unten eine hinzu.</div>
-
-            <div class="gm-input-wrap">
-              <input type="date" id="sleepDate" class="gm-input" style="flex:0 0 150px;">
-              <input type="number" id="sleepHours" class="gm-input" style="flex:0 0 110px;" placeholder="Stunden" min="0" max="24" step="0.25">
-              <select id="sleepQuality" class="gm-input" style="flex:0 0 150px;">
-                <option value="5">★★★★★ Sehr gut</option>
-                <option value="4">★★★★☆ Gut</option>
-                <option value="3" selected>★★★☆☆ Okay</option>
-                <option value="2">★★☆☆☆ Schlecht</option>
-                <option value="1">★☆☆☆☆ Sehr schlecht</option>
-              </select>
-              <button type="button" id="sleepAddBtn" class="gm-btn gm-btn-primary">+ Hinzufügen</button>
-            </div>
-          </div>
-        </div>
-
       </div>
     </section>
 
@@ -2003,75 +1982,20 @@
     d.setDate(d.getDate() + delta);
     return dateToString(d);
   }
-  function formatDateShort(str) {
-    const MONTHS_DE = ['Jan', 'Feb', 'Mär', 'Apr', 'Mai', 'Jun', 'Jul', 'Aug', 'Sep', 'Okt', 'Nov', 'Dez'];
-    const p = str.split('-').map(Number);
-    return p[2] + '. ' + MONTHS_DE[p[1] - 1];
-  }
-  function starsFor(n) {
-    let s = '';
-    for (let i = 1; i <= 5; i++) s += (i <= n ? '★' : '☆');
-    return s;
-  }
-
   function storeGet(key) {
     try {
       const v = localStorage.getItem(key);
       return v ? JSON.parse(v) : null;
     } catch (e) { return null; }
   }
-  function storeSet(key, value) { localStorage.setItem(key, JSON.stringify(value)); }
-
   const SLEEP_KEY = 'sleepLog_v1';
   function getSleep() { return storeGet(SLEEP_KEY) || []; }
-  function saveSleep(list) { storeSet(SLEEP_KEY, list); }
 
-  const dateInput = document.getElementById('sleepDate');
-  const hoursInput = document.getElementById('sleepHours');
-  const qualitySel = document.getElementById('sleepQuality');
-  const addBtn = document.getElementById('sleepAddBtn');
-  const listEl = document.getElementById('sleepList');
-  const emptyEl = document.getElementById('sleepEmptyState');
   const avgHoursEl = document.getElementById('sleepAvgHours');
   const avgQualityEl = document.getElementById('sleepAvgQuality');
 
-  dateInput.value = getActiveDateString();
-
-  function buildRow(s) {
-    const li = document.createElement('li');
-    li.className = 'list-row';
-
-    const main = document.createElement('div');
-    main.className = 'list-row-main';
-    const title = document.createElement('span');
-    title.className = 'list-row-title';
-    title.textContent = s.hours + ' Std.';
-    const sub = document.createElement('span');
-    sub.className = 'list-row-sub';
-    sub.textContent = formatDateShort(s.date) + ' · ' + starsFor(s.quality);
-    main.appendChild(title);
-    main.appendChild(sub);
-    li.appendChild(main);
-
-    const del = document.createElement('button');
-    del.type = 'button';
-    del.className = 'list-row-delete';
-    del.textContent = '×';
-    del.addEventListener('click', () => {
-      saveSleep(getSleep().filter(x => x.id !== s.id));
-      render();
-    });
-    li.appendChild(del);
-
-    return li;
-  }
-
   function render() {
-    const entries = getSleep().slice().sort((a, b) => b.date.localeCompare(a.date) || b.id.localeCompare(a.id));
-    listEl.innerHTML = '';
-    emptyEl.style.display = entries.length === 0 ? '' : 'none';
-    entries.forEach(s => listEl.appendChild(buildRow(s)));
-
+    const entries = getSleep();
     const active = getActiveDateString();
     const weekStart = addDays(active, -6);
     const weekEntries = entries.filter(s => s.date >= weekStart && s.date <= active);
@@ -2085,18 +2009,6 @@
       avgQualityEl.textContent = avgQuality.toFixed(1);
     }
   }
-
-  addBtn.addEventListener('click', () => {
-    const hours = parseFloat(hoursInput.value);
-    const date = dateInput.value || getActiveDateString();
-    const quality = parseInt(qualitySel.value, 10);
-    if (!hours || hours <= 0) return;
-    const entries = getSleep();
-    entries.push({ id: 's_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7), date: date, hours: hours, quality: quality });
-    saveSleep(entries);
-    hoursInput.value = '';
-    render();
-  });
 
   render();
 })();
