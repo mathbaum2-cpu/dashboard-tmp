@@ -1,6 +1,6 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "dashboard",
+  "name": "dsha",
   "compatibility_date": "2026-07-18",
   "assets": {
     "directory": "."
