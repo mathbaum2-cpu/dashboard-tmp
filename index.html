@@ -992,6 +992,11 @@ window.CloudSync = (function () {
 
   function migrateLegacyIfNeeded() {
     if (localStorage.getItem(MIGRATION_FLAG)) return;
+    localStorage.setItem(MIGRATION_FLAG, '1');
+    // Only seed from old per-browser localStorage if the server has never
+    // seen any data yet, so a returning device can't clobber data that's
+    // already synced from elsewhere with its own stale local leftovers.
+    if (updatedAt > 0) return;
     const migrated = {};
     let found = false;
     LEGACY_KEYS_STATIC.forEach(k => {
@@ -1013,7 +1018,6 @@ window.CloudSync = (function () {
       saveCache();
       pushToServer();
     }
-    localStorage.setItem(MIGRATION_FLAG, '1');
   }
 
   function notify() {
@@ -1054,7 +1058,7 @@ window.CloudSync = (function () {
   }
 
   function pullFromServer() {
-    fetch(ENDPOINT)
+    return fetch(ENDPOINT)
       .then(res => res.json())
       .then(server => {
         if (server && typeof server.updatedAt === 'number' && server.updatedAt > updatedAt) {
@@ -1068,11 +1072,13 @@ window.CloudSync = (function () {
   }
 
   loadCache();
-  migrateLegacyIfNeeded();
-  pullFromServer();
-  setInterval(pullFromServer, 4000);
 
-  return { get: get, set: set, del: del, listKeys: listKeys };
+  const ready = pullFromServer().then(() => {
+    migrateLegacyIfNeeded();
+    setInterval(pullFromServer, 4000);
+  });
+
+  return { get: get, set: set, del: del, listKeys: listKeys, ready: ready };
 })();
 </script>
 
@@ -1676,42 +1682,44 @@ window.CloudSync = (function () {
   }
 
   /* ---------- init ---------- */
-  runStreakCheck();
-  runRollover();
+  updateDayRing();
+  setInterval(updateDayRing, 1000);
 
   makeAddHandlers(goalInput, goalAddBtn, goalPolishBtn, () => 'goals:' + getActiveDateString(), polishStatus, loadToday);
   makeAddHandlers(tomorrowInput, tomorrowAddBtn, tomorrowPolishBtn, () => 'goals:' + getTomorrowDateString(), tomorrowStatus, loadTomorrow);
 
-  loadToday();
-  loadTomorrow();
-  renderStreak();
+  CloudSync.ready.then(() => {
+    runStreakCheck();
+    runRollover();
 
-  updateDayRing();
-  setInterval(updateDayRing, 1000);
+    loadToday();
+    loadTomorrow();
+    renderStreak();
 
-  /* re-check for day rollover (active date flips at WAKE_HOUR) without needing a page reload */
-  let lastActiveDate = getActiveDateString();
-  setInterval(() => {
-    const active = getActiveDateString();
-    if (active !== lastActiveDate) {
-      lastActiveDate = active;
-      runStreakCheck();
-      runRollover();
+    /* re-check for day rollover (active date flips at WAKE_HOUR) without needing a page reload */
+    let lastActiveDate = getActiveDateString();
+    setInterval(() => {
+      const active = getActiveDateString();
+      if (active !== lastActiveDate) {
+        lastActiveDate = active;
+        runStreakCheck();
+        runRollover();
+        loadToday();
+        loadTomorrow();
+        renderStreak();
+        window.dispatchEvent(new CustomEvent('goals-changed'));
+      }
+    }, 30 * 1000);
+
+    window.addEventListener('cloud-sync-updated', () => {
       loadToday();
       loadTomorrow();
       renderStreak();
       window.dispatchEvent(new CustomEvent('goals-changed'));
-    }
-  }, 30 * 1000);
+    });
 
-  window.addEventListener('cloud-sync-updated', () => {
-    loadToday();
-    loadTomorrow();
-    renderStreak();
-    window.dispatchEvent(new CustomEvent('goals-changed'));
+    startTicker();
   });
-
-  startTicker();
 })();
 </script>
 
@@ -1922,7 +1930,7 @@ window.CloudSync = (function () {
 
   window.addEventListener('cloud-sync-updated', render);
 
-  render();
+  CloudSync.ready.then(render);
 })();
 </script>
 
@@ -2060,7 +2068,7 @@ window.CloudSync = (function () {
 
   window.addEventListener('cloud-sync-updated', render);
 
-  render();
+  CloudSync.ready.then(render);
 })();
 </script>
 
@@ -2349,7 +2357,7 @@ window.CloudSync = (function () {
 
   window.addEventListener('cloud-sync-updated', render);
 
-  render();
+  CloudSync.ready.then(render);
 })();
 </script>
 </body>
