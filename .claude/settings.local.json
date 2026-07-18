@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(powershell -Command \"Start-Process 'C:\\\\Users\\\\livel\\\\Documents\\\\appmaking\\\\index.html'\")"
+    ]
+  }
+}
