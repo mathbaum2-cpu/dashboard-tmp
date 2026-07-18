@@ -1,3 +1,5 @@
+const KNOWN_TYPES = ['steps', 'heartRate', 'sleep', 'exercise'];
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -14,17 +16,24 @@ export default {
         } catch (e) {
           return new Response('Invalid JSON', { status: 400 });
         }
-        const payload = JSON.stringify({ ...body, updatedAt: Date.now() });
-        await env.HEALTH_KV.put('latest', payload);
-        return new Response(payload, {
+        if (!body || !KNOWN_TYPES.includes(body.type)) {
+          return new Response('Invalid or missing "type" (expected one of: ' + KNOWN_TYPES.join(', ') + ')', { status: 400 });
+        }
+        const entry = JSON.stringify({ type: body.type, value: body.value, updatedAt: Date.now() });
+        await env.HEALTH_KV.put('health:' + body.type, entry);
+        return new Response(entry, {
           status: 200,
           headers: { 'Content-Type': 'application/json' }
         });
       }
 
       if (request.method === 'GET') {
-        const data = await env.HEALTH_KV.get('latest');
-        return new Response(data || '{}', {
+        const result = {};
+        await Promise.all(KNOWN_TYPES.map(async (type) => {
+          const raw = await env.HEALTH_KV.get('health:' + type);
+          result[type] = raw ? JSON.parse(raw) : null;
+        }));
+        return new Response(JSON.stringify(result), {
           status: 200,
           headers: { 'Content-Type': 'application/json' }
         });
