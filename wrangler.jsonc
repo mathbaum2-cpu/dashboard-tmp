@@ -1,8 +1,16 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "dashboard",
+  "main": "worker.js",
   "compatibility_date": "2026-07-18",
   "assets": {
-    "directory": "."
-  }
+    "directory": ".",
+    "binding": "ASSETS"
+  },
+  "kv_namespaces": [
+    {
+      "binding": "HEALTH_KV",
+      "id": "6171798b8f234e7fbee1a7f4b7da0013"
+    }
+  ]
 }
