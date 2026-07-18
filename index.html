@@ -1316,8 +1316,9 @@
     }, 3500);
   }
 
-  function makeAddHandlers(input, addBtn, polishBtn, key, statusEl, reload) {
+  function makeAddHandlers(input, addBtn, polishBtn, keyFn, statusEl, reload) {
     function addGoal(text) {
+      const key = keyFn();
       const goals = storeGet(key) || [];
       goals.push({ text: text, done: false });
       storeSet(key, goals);
@@ -1549,15 +1550,30 @@
   runStreakCheck();
   runRollover();
 
-  makeAddHandlers(goalInput, goalAddBtn, goalPolishBtn, 'goals:' + getActiveDateString(), polishStatus, loadToday);
-  makeAddHandlers(tomorrowInput, tomorrowAddBtn, tomorrowPolishBtn, 'goals:' + getTomorrowDateString(), tomorrowStatus, loadTomorrow);
+  makeAddHandlers(goalInput, goalAddBtn, goalPolishBtn, () => 'goals:' + getActiveDateString(), polishStatus, loadToday);
+  makeAddHandlers(tomorrowInput, tomorrowAddBtn, tomorrowPolishBtn, () => 'goals:' + getTomorrowDateString(), tomorrowStatus, loadTomorrow);
 
   loadToday();
   loadTomorrow();
   renderStreak();
 
   updateDayRing();
-  setInterval(updateDayRing, 60 * 1000);
+  setInterval(updateDayRing, 1000);
+
+  /* re-check for day rollover (active date flips at WAKE_HOUR) without needing a page reload */
+  let lastActiveDate = getActiveDateString();
+  setInterval(() => {
+    const active = getActiveDateString();
+    if (active !== lastActiveDate) {
+      lastActiveDate = active;
+      runStreakCheck();
+      runRollover();
+      loadToday();
+      loadTomorrow();
+      renderStreak();
+      window.dispatchEvent(new CustomEvent('goals-changed'));
+    }
+  }, 30 * 1000);
 
   startTicker();
 })();
