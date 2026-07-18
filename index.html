@@ -960,34 +960,133 @@
   </div>
 
 <script>
+/* ---------- cross-device app data sync ---------- */
+window.CloudSync = (function () {
+  const ENDPOINT = '/api/app-data';
+  const TOKEN = 'rdnBHFUgh4huYFuXc3hYy';
+  const CACHE_KEY = 'cloudSyncCache_v1';
+  const MIGRATION_FLAG = 'cloudSyncMigrated_v1';
+  const LEGACY_KEYS_STATIC = ['habits_v1', 'workouts_v1', 'biocharge_v1', 'goal_streak_v1'];
+  const LEGACY_PREFIXES = ['goals:', 'habitLog:'];
+
+  let state = {};
+  let updatedAt = 0;
+  let pushTimer = null;
+
+  function loadCache() {
+    try {
+      const raw = localStorage.getItem(CACHE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        state = parsed.data || {};
+        updatedAt = parsed.updatedAt || 0;
+      }
+    } catch (e) {}
+  }
+
+  function saveCache() {
+    try {
+      localStorage.setItem(CACHE_KEY, JSON.stringify({ data: state, updatedAt: updatedAt }));
+    } catch (e) {}
+  }
+
+  function migrateLegacyIfNeeded() {
+    if (localStorage.getItem(MIGRATION_FLAG)) return;
+    const migrated = {};
+    let found = false;
+    LEGACY_KEYS_STATIC.forEach(k => {
+      const raw = localStorage.getItem(k);
+      if (raw !== null) {
+        try { migrated[k] = JSON.parse(raw); found = true; } catch (e) {}
+      }
+    });
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (!k) continue;
+      if (LEGACY_PREFIXES.some(p => k.indexOf(p) === 0)) {
+        try { migrated[k] = JSON.parse(localStorage.getItem(k)); found = true; } catch (e) {}
+      }
+    }
+    if (found) {
+      state = Object.assign({}, migrated, state);
+      updatedAt = Date.now();
+      saveCache();
+      pushToServer();
+    }
+    localStorage.setItem(MIGRATION_FLAG, '1');
+  }
+
+  function notify() {
+    window.dispatchEvent(new CustomEvent('cloud-sync-updated'));
+  }
+
+  function get(key) { return state[key]; }
+
+  function set(key, value) {
+    state[key] = value;
+    updatedAt = Date.now();
+    saveCache();
+    schedulePush();
+  }
+
+  function del(key) {
+    delete state[key];
+    updatedAt = Date.now();
+    saveCache();
+    schedulePush();
+  }
+
+  function listKeys(prefix) {
+    return Object.keys(state).filter(k => k.indexOf(prefix) === 0);
+  }
+
+  function schedulePush() {
+    clearTimeout(pushTimer);
+    pushTimer = setTimeout(pushToServer, 400);
+  }
+
+  function pushToServer() {
+    fetch(ENDPOINT, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Auth-Token': TOKEN },
+      body: JSON.stringify({ data: state, updatedAt: updatedAt })
+    }).catch(() => {});
+  }
+
+  function pullFromServer() {
+    fetch(ENDPOINT)
+      .then(res => res.json())
+      .then(server => {
+        if (server && typeof server.updatedAt === 'number' && server.updatedAt > updatedAt) {
+          state = server.data || {};
+          updatedAt = server.updatedAt;
+          saveCache();
+          notify();
+        }
+      })
+      .catch(() => {});
+  }
+
+  loadCache();
+  migrateLegacyIfNeeded();
+  pullFromServer();
+  setInterval(pullFromServer, 4000);
+
+  return { get: get, set: set, del: del, listKeys: listKeys };
+})();
+</script>
+
+<script>
 (function () {
   const ANTHROPIC_API_KEY = '';
   const WAKE_HOUR = 6;
   const SLEEP_HOUR = 22;
 
   /* ---------- storage helpers ---------- */
-  function storeGet(key) {
-    try {
-      const v = localStorage.getItem(key);
-      return v ? JSON.parse(v) : null;
-    } catch (e) {
-      return null;
-    }
-  }
-  function storeSet(key, value) {
-    localStorage.setItem(key, JSON.stringify(value));
-  }
-  function storeDelete(key) {
-    localStorage.removeItem(key);
-  }
-  function storeListKeys(prefix) {
-    const keys = [];
-    for (let i = 0; i < localStorage.length; i++) {
-      const k = localStorage.key(i);
-      if (k && k.indexOf(prefix) === 0) keys.push(k);
-    }
-    return keys;
-  }
+  function storeGet(key) { return CloudSync.get(key) ?? null; }
+  function storeSet(key, value) { CloudSync.set(key, value); }
+  function storeDelete(key) { CloudSync.del(key); }
+  function storeListKeys(prefix) { return CloudSync.listKeys(prefix); }
 
   /* ---------- date helpers ---------- */
   function pad(n) { return n < 10 ? '0' + n : '' + n; }
@@ -1605,6 +1704,13 @@
     }
   }, 30 * 1000);
 
+  window.addEventListener('cloud-sync-updated', () => {
+    loadToday();
+    loadTomorrow();
+    renderStreak();
+    window.dispatchEvent(new CustomEvent('goals-changed'));
+  });
+
   startTicker();
 })();
 </script>
@@ -1639,13 +1745,8 @@
   }
 
   /* ---------- storage ---------- */
-  function storeGet(key) {
-    try {
-      const v = localStorage.getItem(key);
-      return v ? JSON.parse(v) : null;
-    } catch (e) { return null; }
-  }
-  function storeSet(key, value) { localStorage.setItem(key, JSON.stringify(value)); }
+  function storeGet(key) { return CloudSync.get(key) ?? null; }
+  function storeSet(key, value) { CloudSync.set(key, value); }
 
   const HABITS_KEY = 'habits_v1';
   function getHabits() { return storeGet(HABITS_KEY) || []; }
@@ -1771,7 +1872,7 @@
     delBtn.addEventListener('click', () => {
       const habits = getHabits().filter(h => h.id !== habit.id);
       saveHabits(habits);
-      localStorage.removeItem(logKey(habit.id));
+      CloudSync.del(logKey(habit.id));
       render();
     });
     li.appendChild(delBtn);
@@ -1818,6 +1919,8 @@
   habitInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') { e.preventDefault(); addHabit(); }
   });
+
+  window.addEventListener('cloud-sync-updated', render);
 
   render();
 })();
@@ -1879,13 +1982,8 @@
     return p[2] + '. ' + MONTHS_DE[p[1] - 1];
   }
 
-  function storeGet(key) {
-    try {
-      const v = localStorage.getItem(key);
-      return v ? JSON.parse(v) : null;
-    } catch (e) { return null; }
-  }
-  function storeSet(key, value) { localStorage.setItem(key, JSON.stringify(value)); }
+  function storeGet(key) { return CloudSync.get(key) ?? null; }
+  function storeSet(key, value) { CloudSync.set(key, value); }
 
   const WORKOUTS_KEY = 'workouts_v1';
   function getWorkouts() { return storeGet(WORKOUTS_KEY) || []; }
@@ -1959,6 +2057,8 @@
     durationInput.value = '';
     render();
   });
+
+  window.addEventListener('cloud-sync-updated', render);
 
   render();
 })();
@@ -2121,13 +2221,8 @@
 <script>
 /* ---------- biocharge ---------- */
 (function () {
-  function storeGet(key) {
-    try {
-      const v = localStorage.getItem(key);
-      return v ? JSON.parse(v) : null;
-    } catch (e) { return null; }
-  }
-  function storeSet(key, value) { localStorage.setItem(key, JSON.stringify(value)); }
+  function storeGet(key) { return CloudSync.get(key) ?? null; }
+  function storeSet(key, value) { CloudSync.set(key, value); }
 
   const BIO_KEY = 'biocharge_v1';
   function getEntries() { return storeGet(BIO_KEY) || []; }
@@ -2251,6 +2346,8 @@
   bioInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') { e.preventDefault(); bioAddBtn.click(); }
   });
+
+  window.addEventListener('cloud-sync-updated', render);
 
   render();
 })();
